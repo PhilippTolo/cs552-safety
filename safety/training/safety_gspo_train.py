@@ -55,7 +55,7 @@ PatchFastRL("GRPO", FastLanguageModel)
 # CONFIGURATION
 # ===========================================================================
 
-SFT_MODEL_PATH   = "/scratch/safety/sft_v3/merged"
+SFT_MODEL_PATH   = "/scratch/safety/sft_v2/merged"
 FILTERED_JSONL   = "/scratch/safety/data/pkusafe_grpo_filtered.jsonl"
 OUTPUT_DIR       = "/scratch/safety/grpo_v5"
 

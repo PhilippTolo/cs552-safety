@@ -46,7 +46,7 @@ from transformers import AutoTokenizer
 # CONFIG  — edit these paths before running
 # ===========================================================================
 
-SFT_MODEL_PATH   = "/scratch/safety/sft_v3/merged"
+SFT_MODEL_PATH   = "/scratch/safety/sft_v2/merged"
 INPUT_JSONL      = "/scratch/safety/data/pkusafe_grpo_train.jsonl"
 OUTPUT_JSONL     = "/scratch/safety/data/pkusafe_grpo_filtered.jsonl"
 
