@@ -319,6 +319,11 @@ def main():
         f"{NUM_GENERATIONS} rollouts each"
     )
 
+    # TRL expects model.warnings_issued (a PreTrainedModel attr) but PEFT's
+    # __getattr__ doesn't find it on the wrapped model — init it manually.
+    if not hasattr(model, "warnings_issued"):
+        model.warnings_issued = {}
+
     trainer = GRPOTrainer(
         model            = model,
         processing_class = tokenizer,
