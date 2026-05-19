@@ -179,6 +179,7 @@ def load_model_and_tokenizer():
         load_in_8bit           = False,
         fast_inference         = True,           # vLLM rollout backend
         gpu_memory_utilization = GPU_MEM_UTIL,
+        enforce_eager          = True,           # workaround: vLLM 0.19.1 graph compilation bug
     )
 
     log.info("Attaching LoRA adapter …")
