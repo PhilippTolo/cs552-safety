@@ -180,6 +180,7 @@ def load_model_and_tokenizer():
         fast_inference         = True,           # vLLM rollout backend
         gpu_memory_utilization = GPU_MEM_UTIL,
         enforce_eager          = True,           # workaround: vLLM 0.19.1 graph compilation bug
+        dtype                  = torch.bfloat16, # force BF16 to avoid Half/BFloat16 mismatch in LoRA forward
     )
 
     log.info("Attaching LoRA adapter …")
