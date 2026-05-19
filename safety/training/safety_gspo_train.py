@@ -79,6 +79,16 @@ if "vllm_ascend" not in sys.modules:
         )
         sys.modules["vllm_ascend.distributed.device_communicators.pyhccl"] = _pyhccl
 
+# mergekit — optional TRL dependency (model merging); not installed on cluster.
+if "mergekit" not in sys.modules:
+    try:
+        import mergekit  # noqa: F401
+    except ImportError:
+        sys.modules["mergekit"] = _stub_mod("mergekit")
+        sys.modules["mergekit.config"] = _stub_mod(
+            "mergekit.config", MergeConfiguration=_M
+        )
+
 import torch
 from datasets import Dataset
 from peft import LoraConfig, TaskType, get_peft_model
