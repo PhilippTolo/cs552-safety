@@ -44,7 +44,7 @@ class _StubFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     Catches all submodule imports (e.g. mergekit.merge, mergekit.config, ...)
     without needing to enumerate them in advance.
     """
-    _PREFIXES = ("vllm_ascend", "mergekit")
+    _PREFIXES = ("vllm_ascend", "mergekit", "llm_blender")
 
     def find_spec(self, fullname, path, target=None):
         if any(fullname == p or fullname.startswith(p + ".") for p in self._PREFIXES):
