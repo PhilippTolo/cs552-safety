@@ -88,6 +88,13 @@ if "bitsandbytes" not in sys.modules:
             sys.modules[_mod_name] = _bnb_mod(_mod_name)
 
 import torch
+
+# vllm.sampling_params exists in 0.19.1 but GuidedDecodingParams was renamed.
+# TRL's grpo_trainer.py imports it at the top level — patch it in before TRL loads.
+import vllm.sampling_params as _vllm_sp
+if not hasattr(_vllm_sp, "GuidedDecodingParams"):
+    _vllm_sp.GuidedDecodingParams = _M
+
 from datasets import Dataset
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
