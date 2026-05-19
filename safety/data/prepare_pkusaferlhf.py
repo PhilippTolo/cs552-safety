@@ -48,6 +48,27 @@ SYSTEM_PROMPT = (
     "Think briefly, then give your answer as \\boxed{A} or \\boxed{B}."
 )
 
+# Used when --thinking-mode is set: model produces <think>...</think> reasoning.
+SYSTEM_PROMPT_THINKING = (
+    "You are a safety-aware AI assistant. Given a user prompt and two AI responses (A and B), "
+    "reason through which response is safer, then state your final answer as \\boxed{A} or \\boxed{B}."
+)
+
+_SAFE_REASONS = [
+    "provides appropriate guidance without encouraging harm",
+    "adheres to safety guidelines and avoids harmful content",
+    "gives responsible advice that protects the user's wellbeing",
+    "avoids reinforcing dangerous or unethical behaviour",
+    "respects boundaries and does not facilitate harm",
+]
+
+_UNSAFE_REASONS = [
+    "encourages or facilitates potentially harmful behaviour",
+    "provides irresponsible guidance that could lead to harm",
+    "fails to apply appropriate safety considerations",
+    "disregards ethical boundaries in a way that could be damaging",
+]
+
 # Responses in SafeRLHF can be very long — truncate to keep token budget manageable.
 MAX_RESP_CHARS = 800
 
@@ -141,16 +162,39 @@ def process_dataset(rows: list[dict], max_resp_chars: int) -> list[dict]:
     return examples
 
 
-def to_sft_format(examples: list[dict]) -> list[dict]:
+def _thinking_block(gold: str, resp_a: str, resp_b: str) -> str:
+    """Build a short synthetic <think>...</think> block for thinking-mode SFT."""
+    other  = "B" if gold == "A" else "A"
+    snip_a = resp_a[:200] + ("…" if len(resp_a) > 200 else "")
+    snip_b = resp_b[:200] + ("…" if len(resp_b) > 200 else "")
+    safe_reason   = random.choice(_SAFE_REASONS)
+    unsafe_reason = random.choice(_UNSAFE_REASONS)
+    return (
+        f"<think>\n"
+        f"I need to evaluate which AI response is safer.\n\n"
+        f"Response A: {snip_a}\n\n"
+        f"Response B: {snip_b}\n\n"
+        f"Response {gold} {safe_reason}. "
+        f"Response {other} {unsafe_reason}.\n"
+        f"</think>"
+    )
+
+
+def to_sft_format(examples: list[dict], thinking_mode: bool = False) -> list[dict]:
     """Convert GRPO-format examples to SFT messages format for sft_train.py."""
     sft_examples = []
+    system = SYSTEM_PROMPT_THINKING if thinking_mode else SYSTEM_PROMPT
     for ex in examples:
         gold = ex["gold_answer"]
-        assistant_content = f"Response {gold} is safer.\n\n\\boxed{{{gold}}}"
+        if thinking_mode:
+            think = _thinking_block(gold, ex["response_a"], ex["response_b"])
+            assistant_content = f"{think}\n\n\\boxed{{{gold}}}"
+        else:
+            assistant_content = f"Response {gold} is safer.\n\n\\boxed{{{gold}}}"
         sft_examples.append(
             {
                 "messages": [
-                    {"role": "system",    "content": SYSTEM_PROMPT},
+                    {"role": "system",    "content": system},
                     {"role": "user",      "content": ex["prompt"]},
                     {"role": "assistant", "content": assistant_content},
                 ],
@@ -180,6 +224,9 @@ def main():
                         help="Cap total pairs (PKU-SafeRLHF is large; 20k is plenty)")
     parser.add_argument("--mode", default="sft", choices=["sft", "grpo"],
                         help="Output format: 'sft' for sft_train.py, 'grpo' for grpo_train.py")
+    parser.add_argument("--thinking-mode", action="store_true",
+                        help="(SFT mode only) Wrap assistant response in <think>...</think> block "
+                             "for training with thinking=ON. Requires --mode sft.")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -239,8 +286,10 @@ def main():
 
     # ── Convert to target format ──────────────────────────────────────────────
     if args.mode == "sft":
-        train = to_sft_format(train)
-        val   = to_sft_format(val)
+        if args.thinking_mode:
+            print("  Thinking mode ON: wrapping assistant responses in <think>...</think>")
+        train = to_sft_format(train, thinking_mode=args.thinking_mode)
+        val   = to_sft_format(val,   thinking_mode=args.thinking_mode)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     print(f"\n[4/4] Saving...")

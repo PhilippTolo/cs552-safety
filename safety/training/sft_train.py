@@ -77,17 +77,16 @@ QWEN3_LORA_TARGETS = [
 
 def apply_template(tokenizer, messages, **kwargs) -> str:
     """
-    Call apply_chat_template with enable_thinking=False when supported.
+    Call apply_chat_template with enable_thinking=True (Qwen3 default).
 
-    Qwen3 is a thinking model: with add_generation_prompt=True its template
-    inserts '<think>\\n' tokens that are NOT present when the assistant turn is
-    pre-filled (add_generation_prompt=False + full messages).  That extra token
-    inflates the measured prompt length and causes TRL's auto-masking to mask
-    assistant tokens as -100, giving loss = 0/0 = NaN.  Disabling thinking
-    mode makes both tokenisations consistent.
+    Training data includes <think>...</think> blocks in assistant responses.
+    Both the prompt-only tokenisation (add_generation_prompt=True) and the
+    full-conversation tokenisation are consistent: the prompt ends with the
+    <think>\\n generation prefix, and the assistant turn picks up from there.
+    Our explicit label masking handles the split correctly.
     """
     try:
-        return tokenizer.apply_chat_template(messages, enable_thinking=False, **kwargs)
+        return tokenizer.apply_chat_template(messages, enable_thinking=True, **kwargs)
     except TypeError:
         return tokenizer.apply_chat_template(messages, **kwargs)
 
@@ -131,15 +130,21 @@ def preprocess_for_sft(
     """
     Tokenize and create labels with explicit masking.
 
-    System + user tokens → label = -100  (masked, not included in loss)
-    Assistant tokens     → label = token_id  (loss computed here)
+    System + user tokens      → label = -100  (masked, not in loss)
+    <think>\\n header tokens   → label = -100  (masked — template forces these)
+    Reasoning + answer tokens → label = token_id  (loss computed here)
 
-    We do NOT rely on TRL's auto-masking because it derives prompt length from
-    the prompt-only tokenization (add_generation_prompt=True).  For Qwen3 in
-    thinking mode that injects '<think>\\n' tokens which are absent in the full
-    conversation, causing the split point to be off and assistant tokens to be
-    erroneously masked to -100 → loss = 0/0 = NaN → NaN gradients → corrupted
-    weights.
+    With enable_thinking=True, Qwen3's add_generation_prompt=True appends
+    '<think>\\n' as the generation prefix.  The full conversation tokenisation
+    starts the assistant turn with the SAME '<think>\\n' tokens (because our
+    training data includes <think>...</think> blocks).  Both tokenisations are
+    therefore consistent: n_prompt captures through '<think>\\n', and the loss
+    starts from the first reasoning token — which is correct, since '<think>\\n'
+    is forced by the template and does not need to be learned.
+
+    We still use explicit masking (rather than TRL's auto-masking) because TRL
+    derives the split from prompt-only tokenization which can be brittle across
+    TRL versions and Qwen3 template variants.
     """
     result: dict[str, list] = {"input_ids": [], "attention_mask": [], "labels": []}
     skipped = 0
@@ -242,7 +247,7 @@ class FormatComplianceCallback(TrainerCallback):
 
                 out_ids = raw_model.generate(
                     **inputs,
-                    max_new_tokens=64,
+                    max_new_tokens=512,
                     do_sample=False,
                     pad_token_id=self.tokenizer.pad_token_id,
                 )
@@ -312,7 +317,8 @@ def parse_args():
     p.add_argument("--lr",             type=float, default=2e-5,
                    help="LoRA LR — conservative default to avoid mode collapse on short repetitive outputs")
     p.add_argument("--warmup-ratio",   type=float, default=0.05)
-    p.add_argument("--max-seq-length", type=int,   default=1024)
+    p.add_argument("--max-seq-length", type=int,   default=2048,
+                   help="Thinking traces need more space than plain \\boxed{X} outputs")
     p.add_argument("--weight-decay",   type=float, default=0.01)
 
     # Logging / eval / save
@@ -394,16 +400,8 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Patch chat_template to force enable_thinking=false.
-    # Must match what merge_lora.py bakes into the merged checkpoint — if training
-    # uses thinking=ON (default) but inference uses thinking=OFF, the model sees a
-    # different generation prompt context and produces garbage at inference time.
-    _THINKING_OVERRIDE = "{%- set enable_thinking = false %}"
-    if tokenizer.chat_template and _THINKING_OVERRIDE not in tokenizer.chat_template:
-        tokenizer.chat_template = _THINKING_OVERRIDE + "\n" + tokenizer.chat_template
-        print("  Patched chat_template: enable_thinking=false")
-
     print(f"  Vocab size: {tokenizer.vocab_size:,}  |  pad_token: {tokenizer.pad_token!r}")
+    print("  Thinking mode: ON (enable_thinking=True — <think> blocks in training data)")
 
     # ── Data ──────────────────────────────────────────────────────────────────
     print("[2/6] Loading and filtering data...")

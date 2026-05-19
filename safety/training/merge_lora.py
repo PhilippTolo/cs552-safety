@@ -65,6 +65,10 @@ def main():
     p.add_argument("--temperature", type=float, default=0.6)
     p.add_argument("--top-k",       type=int,   default=20)
     p.add_argument("--top-p",       type=float, default=0.9)
+    p.add_argument("--disable-thinking", action="store_true",
+                   help="Patch chat_template to force enable_thinking=false in the merged model. "
+                        "Use for sft_v1/v2 (trained with thinking OFF). "
+                        "Omit for sft_v3+ (trained with thinking ON).")
     args = p.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -101,35 +105,35 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.adapter, trust_remote_code=True)
     tokenizer.save_pretrained(args.output)
 
-    # ── Patch chat_template to force non-thinking mode ────────────────────────
-    # The CI never passes enable_thinking as a kwarg, so the template must
-    # bake in the default.  Prepending this line overrides whatever the base
-    # Qwen3 template sets (which defaults to enable_thinking=True).
-    print("[3b/4] Patching chat_template to force enable_thinking=false...")
-    _THINKING_OVERRIDE = "{%- set enable_thinking = false %}"
+    # ── Optionally patch chat_template to force non-thinking mode ────────────
+    # Only applied with --disable-thinking (for sft_v1/v2 checkpoints).
+    # sft_v3+ are trained with thinking=ON — leave the template at its default.
+    if args.disable_thinking:
+        print("[3b/4] Patching chat_template to force enable_thinking=false (--disable-thinking)...")
+        _THINKING_OVERRIDE = "{%- set enable_thinking = false %}"
 
-    # Patch tokenizer_config.json (embedded template)
-    tok_cfg_path = os.path.join(args.output, "tokenizer_config.json")
-    if os.path.exists(tok_cfg_path):
-        with open(tok_cfg_path, encoding="utf-8") as _f:
-            tok_cfg = json.load(_f)
-        if "chat_template" in tok_cfg and _THINKING_OVERRIDE not in tok_cfg["chat_template"]:
-            tok_cfg["chat_template"] = _THINKING_OVERRIDE + "\n" + tok_cfg["chat_template"]
-            with open(tok_cfg_path, "w", encoding="utf-8") as _f:
-                json.dump(tok_cfg, _f, ensure_ascii=False, indent=2)
-            print("  Patched tokenizer_config.json chat_template.")
-        else:
-            print("  tokenizer_config.json: patch already present or no chat_template field.")
+        tok_cfg_path = os.path.join(args.output, "tokenizer_config.json")
+        if os.path.exists(tok_cfg_path):
+            with open(tok_cfg_path, encoding="utf-8") as _f:
+                tok_cfg = json.load(_f)
+            if "chat_template" in tok_cfg and _THINKING_OVERRIDE not in tok_cfg["chat_template"]:
+                tok_cfg["chat_template"] = _THINKING_OVERRIDE + "\n" + tok_cfg["chat_template"]
+                with open(tok_cfg_path, "w", encoding="utf-8") as _f:
+                    json.dump(tok_cfg, _f, ensure_ascii=False, indent=2)
+                print("  Patched tokenizer_config.json chat_template.")
+            else:
+                print("  tokenizer_config.json: patch already present or no chat_template field.")
 
-    # Also patch a standalone chat_template.jinja if it exists
-    jinja_path = os.path.join(args.output, "chat_template.jinja")
-    if os.path.exists(jinja_path):
-        with open(jinja_path, encoding="utf-8") as _f:
-            jinja_src = _f.read()
-        if _THINKING_OVERRIDE not in jinja_src:
-            with open(jinja_path, "w", encoding="utf-8") as _f:
-                _f.write(_THINKING_OVERRIDE + "\n" + jinja_src)
-            print("  Patched chat_template.jinja.")
+        jinja_path = os.path.join(args.output, "chat_template.jinja")
+        if os.path.exists(jinja_path):
+            with open(jinja_path, encoding="utf-8") as _f:
+                jinja_src = _f.read()
+            if _THINKING_OVERRIDE not in jinja_src:
+                with open(jinja_path, "w", encoding="utf-8") as _f:
+                    _f.write(_THINKING_OVERRIDE + "\n" + jinja_src)
+                print("  Patched chat_template.jinja.")
+    else:
+        print("[3b/4] Keeping thinking=ON in chat_template (sft_v3+ default).")
 
     # ── Write generation_config.json ──────────────────────────────────────────
     print("[4/4] Writing generation_config.json...")
