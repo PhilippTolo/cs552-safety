@@ -58,9 +58,19 @@ import unsloth.kernels.fast_lora as _unsloth_fast_lora
 _orig_matmul_lora = _unsloth_fast_lora.matmul_lora
 
 def _safe_matmul_lora(X, W, W_quant, A, B, s, out=None):
-    if X is not None and X.dtype == torch.float16:
-        X = X.to(torch.bfloat16)
-    return _orig_matmul_lora(X, W, W_quant, A, B, s, out)
+    # The enclosing @torch.amp.autocast("cuda") (default FP16) makes matmul
+    # outputs FP16 even if inputs are BF16, while LoRA matrices stay BF16.
+    # Disable autocast and cast everything to B.dtype (BF16) to stay consistent.
+    with torch.amp.autocast("cuda", enabled=False):
+        d = B.dtype  # BF16
+        X = X.to(d)
+        if W is not None:
+            W = W.to(d)
+        if A is not None:
+            A = A.to(d)
+        if out is not None and out.dtype != d:
+            out = out.to(d)
+        return _orig_matmul_lora(X, W, W_quant, A, B, s, out)
 
 _unsloth_fast_lora.matmul_lora = _safe_matmul_lora
 
