@@ -58,10 +58,13 @@ import unsloth.kernels.fast_lora as _unsloth_fast_lora
 _orig_matmul_lora = _unsloth_fast_lora.matmul_lora
 
 def _safe_matmul_lora(X, W, W_quant, A, B, s, out=None):
-    # Unsloth's matmul_lora uses dtype=W.dtype (BF16) for B.to(dtype), but under
-    # FP16 autocast, out=X@W is FP16 → addmm_(FP16, BF16) fails.
-    # Fix: cast W/A/B to X.dtype (FP16 from autocast) so everything is consistent.
-    d = X.dtype
+    # Unsloth sets dtype=W.dtype (BF16) but under FP16 autocast X@W → FP16,
+    # so addmm_(FP16_out, B.to(BF16)) fails. Fix: cast W/A/B to the ACTIVE
+    # autocast compute dtype (FP16), not to X.dtype (which is still BF16 in storage).
+    if torch.is_autocast_enabled():
+        d = torch.get_autocast_gpu_dtype()  # FP16 under @autocast("cuda")
+    else:
+        d = X.dtype
     if W is not None and W.dtype != d:
         W = W.to(d)
     if A is not None and A.dtype != d:
