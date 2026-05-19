@@ -33,22 +33,26 @@ import types
 import importlib.machinery
 
 # ---------------------------------------------------------------------------
-# bitsandbytes mock — CUDA 12.8 incompatible with real bitsandbytes.
-# Must come before ANY peft/trl import.
+# Module mocks — must come before ANY peft/trl import.
 # ---------------------------------------------------------------------------
+from unittest.mock import MagicMock as _M
+
+
+def _stub_mod(name: str, **attrs):
+    """Return a stub module with the given attributes."""
+    m = types.ModuleType(name)
+    m.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+    m.__getattr__ = lambda attr: _M()
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    return m
+
+
+# bitsandbytes — incompatible with CUDA 12.8
 if "bitsandbytes" not in sys.modules:
     try:
         import bitsandbytes  # noqa: F401
     except (RuntimeError, ImportError):
-        from unittest.mock import MagicMock as _M
-
-        def _bnb_mod(name: str):
-            m = types.ModuleType(name)
-            m.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
-            m.__version__ = "0.41.0"
-            m.__getattr__ = lambda attr: _M()
-            return m
-
         for _mod_name in (
             "bitsandbytes", "bitsandbytes.nn", "bitsandbytes.nn.modules",
             "bitsandbytes.functional", "bitsandbytes.optim",
@@ -56,7 +60,24 @@ if "bitsandbytes" not in sys.modules:
             "bitsandbytes.research", "bitsandbytes.research.nn",
             "bitsandbytes.cextension",
         ):
-            sys.modules[_mod_name] = _bnb_mod(_mod_name)
+            sys.modules[_mod_name] = _stub_mod(_mod_name, __version__="0.41.0")
+
+# vllm_ascend — Huawei NPU module imported by TRL's vllm_client.py on this
+# vLLM 0.19.1 installation; does not exist on NVIDIA A100.
+if "vllm_ascend" not in sys.modules:
+    try:
+        import vllm_ascend  # noqa: F401
+    except ImportError:
+        _pyhccl = _stub_mod(
+            "vllm_ascend.distributed.device_communicators.pyhccl",
+            PyHcclCommunicator=_M,
+        )
+        sys.modules["vllm_ascend"] = _stub_mod("vllm_ascend")
+        sys.modules["vllm_ascend.distributed"] = _stub_mod("vllm_ascend.distributed")
+        sys.modules["vllm_ascend.distributed.device_communicators"] = _stub_mod(
+            "vllm_ascend.distributed.device_communicators"
+        )
+        sys.modules["vllm_ascend.distributed.device_communicators.pyhccl"] = _pyhccl
 
 import torch
 from datasets import Dataset
