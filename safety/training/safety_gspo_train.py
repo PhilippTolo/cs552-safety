@@ -212,7 +212,7 @@ def build_training_args() -> GRPOConfig:
 
         # ── rollout ───────────────────────────────────────────────
         num_generations               = NUM_GENERATIONS,
-        max_new_tokens                = MAX_NEW_TOKENS,
+        max_completion_length         = MAX_NEW_TOKENS,
         temperature                   = ROLLOUT_TEMP,
         top_p                         = ROLLOUT_TOP_P,
         top_k                         = ROLLOUT_TOP_K,
