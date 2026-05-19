@@ -51,6 +51,19 @@ from reward_functions import (
 # Patch TRL's GRPOTrainer with Unsloth kernels BEFORE any model loading
 PatchFastRL("GRPO", FastLanguageModel)
 
+# Fix: Unsloth decorates attention forward with @torch.amp.autocast("cuda"), which
+# defaults to float16. Activations become FP16 but LoRA matrices are BF16, so
+# addmm_() raises "Half vs BFloat16". Cast X → BF16 on every matmul_lora call.
+import unsloth.kernels.fast_lora as _unsloth_fast_lora
+_orig_matmul_lora = _unsloth_fast_lora.matmul_lora
+
+def _safe_matmul_lora(X, W, W_quant, A, B, s, out=None):
+    if X is not None and X.dtype == torch.float16:
+        X = X.to(torch.bfloat16)
+    return _orig_matmul_lora(X, W, W_quant, A, B, s, out)
+
+_unsloth_fast_lora.matmul_lora = _safe_matmul_lora
+
 # ===========================================================================
 # CONFIGURATION
 # ===========================================================================
