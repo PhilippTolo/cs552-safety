@@ -81,7 +81,6 @@ MAX_NEW_TOKENS   = 512    # room for brief <think> trace + \boxed{X}
 ROLLOUT_TEMP     = 1.0    # high T needed — sft_v3 is confident on binary MCQ
 ROLLOUT_TOP_P    = 0.95
 ROLLOUT_TOP_K    = 20
-GPU_MEM_UTIL     = 0.55   # fraction given to vLLM; rest goes to training pass
 
 # Optimisation
 PER_DEVICE_BATCH  = 1
@@ -177,9 +176,7 @@ def load_model_and_tokenizer():
         max_seq_length         = MAX_SEQ_LENGTH,
         load_in_4bit           = False,
         load_in_8bit           = False,
-        fast_inference         = True,           # vLLM rollout backend
-        gpu_memory_utilization = GPU_MEM_UTIL,
-        enforce_eager          = True,           # workaround: vLLM 0.19.1 graph compilation bug
+        fast_inference         = False,          # vLLM causes FP16/BF16 dtype mismatch in matmul_lora
         dtype                  = torch.bfloat16,
     )
 
