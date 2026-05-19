@@ -35,24 +35,49 @@ import importlib.machinery
 # ---------------------------------------------------------------------------
 # Module mocks — must come before ANY peft/trl import.
 # ---------------------------------------------------------------------------
+import importlib.abc
 from unittest.mock import MagicMock as _M
 
 
-def _stub_mod(name: str, **attrs):
-    """Return a stub module with the given attributes."""
-    m = types.ModuleType(name)
-    m.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
-    m.__getattr__ = lambda attr: _M()
-    for k, v in attrs.items():
-        setattr(m, k, v)
-    return m
+class _StubFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Intercepts imports of unavailable packages and returns stub modules.
+    Catches all submodule imports (e.g. mergekit.merge, mergekit.config, ...)
+    without needing to enumerate them in advance.
+    """
+    _PREFIXES = ("vllm_ascend", "mergekit")
+
+    def find_spec(self, fullname, path, target=None):
+        if any(fullname == p or fullname.startswith(p + ".") for p in self._PREFIXES):
+            if fullname not in sys.modules:
+                return importlib.machinery.ModuleSpec(fullname, self, is_package=True)
+        return None
+
+    def create_module(self, spec):
+        m = types.ModuleType(spec.name)
+        m.__spec__ = spec
+        m.__path__ = []          # marks it as a package so sub-imports work
+        m.__package__ = spec.name
+        m.__getattr__ = lambda attr: _M()
+        return m
+
+    def exec_module(self, module):
+        pass                     # nothing to execute; create_module did the work
 
 
-# bitsandbytes — incompatible with CUDA 12.8
+sys.meta_path.insert(0, _StubFinder())
+
+# bitsandbytes — incompatible with CUDA 12.8; must mock before peft import.
 if "bitsandbytes" not in sys.modules:
     try:
         import bitsandbytes  # noqa: F401
     except (RuntimeError, ImportError):
+        def _bnb_mod(name: str):
+            m = types.ModuleType(name)
+            m.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+            m.__version__ = "0.41.0"
+            m.__getattr__ = lambda attr: _M()
+            return m
+
         for _mod_name in (
             "bitsandbytes", "bitsandbytes.nn", "bitsandbytes.nn.modules",
             "bitsandbytes.functional", "bitsandbytes.optim",
@@ -60,34 +85,7 @@ if "bitsandbytes" not in sys.modules:
             "bitsandbytes.research", "bitsandbytes.research.nn",
             "bitsandbytes.cextension",
         ):
-            sys.modules[_mod_name] = _stub_mod(_mod_name, __version__="0.41.0")
-
-# vllm_ascend — Huawei NPU module imported by TRL's vllm_client.py on this
-# vLLM 0.19.1 installation; does not exist on NVIDIA A100.
-if "vllm_ascend" not in sys.modules:
-    try:
-        import vllm_ascend  # noqa: F401
-    except ImportError:
-        _pyhccl = _stub_mod(
-            "vllm_ascend.distributed.device_communicators.pyhccl",
-            PyHcclCommunicator=_M,
-        )
-        sys.modules["vllm_ascend"] = _stub_mod("vllm_ascend")
-        sys.modules["vllm_ascend.distributed"] = _stub_mod("vllm_ascend.distributed")
-        sys.modules["vllm_ascend.distributed.device_communicators"] = _stub_mod(
-            "vllm_ascend.distributed.device_communicators"
-        )
-        sys.modules["vllm_ascend.distributed.device_communicators.pyhccl"] = _pyhccl
-
-# mergekit — optional TRL dependency (model merging); not installed on cluster.
-if "mergekit" not in sys.modules:
-    try:
-        import mergekit  # noqa: F401
-    except ImportError:
-        sys.modules["mergekit"] = _stub_mod("mergekit")
-        sys.modules["mergekit.config"] = _stub_mod(
-            "mergekit.config", MergeConfiguration=_M
-        )
+            sys.modules[_mod_name] = _bnb_mod(_mod_name)
 
 import torch
 from datasets import Dataset
