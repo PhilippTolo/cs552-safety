@@ -228,8 +228,8 @@ def build_training_args() -> GRPOConfig:
         max_grad_norm                 = MAX_GRAD_NORM,
 
         # ── GSPO clipping ─────────────────────────────────────────
-        cliprange                     = CLIP_EPSILON,
-        kl_coeff                      = KL_COEFF,
+        epsilon                       = CLIP_EPSILON,
+        beta                          = KL_COEFF,
 
         # ── precision ─────────────────────────────────────────────
         bf16                          = torch.cuda.is_bf16_supported(),
