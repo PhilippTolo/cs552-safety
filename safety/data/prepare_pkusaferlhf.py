@@ -163,14 +163,19 @@ def process_dataset(rows: list[dict], max_resp_chars: int) -> list[dict]:
 
 
 def _thinking_block(gold: str, resp_a: str, resp_b: str) -> str:
-    """Build a short synthetic <think>...</think> block for thinking-mode SFT."""
+    """Build a short synthetic thinking block for thinking-mode SFT.
+
+    Do NOT include the opening <think> tag — Qwen3's chat template adds
+    <think>\\n automatically as the generation prefix (enable_thinking=True).
+    Labels must start from the first reasoning token so the model learns to
+    continue after <think>\\n, not to repeat it.
+    """
     other  = "B" if gold == "A" else "A"
     snip_a = resp_a[:200] + ("…" if len(resp_a) > 200 else "")
     snip_b = resp_b[:200] + ("…" if len(resp_b) > 200 else "")
     safe_reason   = random.choice(_SAFE_REASONS)
     unsafe_reason = random.choice(_UNSAFE_REASONS)
     return (
-        f"<think>\n"
         f"I need to evaluate which AI response is safer.\n\n"
         f"Response A: {snip_a}\n\n"
         f"Response B: {snip_b}\n\n"
