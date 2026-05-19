@@ -183,16 +183,25 @@ def load_model_and_tokenizer():
         dtype                  = torch.bfloat16,
     )
 
-    # With fast_inference=True, Unsloth's training-path model can load in FP16
+    # With fast_inference=True, Unsloth may load the training-path model in FP16
     # even when dtype=bfloat16 is requested.  LoRA matrices initialise in BF16
     # on A100, so addmm_ in matmul_lora raises "Half vs BFloat16".
-    # Fix: cast any residual FP16 base-model params to BF16 before LoRA init.
-    n_fp16 = sum(1 for p in model.parameters() if p.dtype == torch.float16)
-    if n_fp16 > 0:
-        log.info(f"  Casting {n_fp16} FP16 params → BF16 before LoRA init")
-        for p in model.parameters():
+    # Fix: cast FP16 → BF16 BEFORE LoRA init (params) and AFTER (params + buffers).
+    def _cast_fp16_to_bf16(m: torch.nn.Module, label: str) -> int:
+        count = 0
+        for p in m.parameters():
             if p.dtype == torch.float16:
                 p.data = p.data.to(torch.bfloat16)
+                count += 1
+        for b in m.buffers():
+            if b.dtype == torch.float16:
+                b.data = b.data.to(torch.bfloat16)
+                count += 1
+        if count:
+            log.info(f"  [{label}] Cast {count} FP16 tensors → BF16")
+        return count
+
+    _cast_fp16_to_bf16(model, "pre-LoRA")
 
     log.info("Attaching LoRA adapter …")
     model = FastLanguageModel.get_peft_model(
@@ -204,6 +213,9 @@ def load_model_and_tokenizer():
         use_gradient_checkpointing = "unsloth",
         random_state               = 42,
     )
+
+    # Re-cast after PEFT wrapping — Unsloth may reinitialise weight views in FP16.
+    _cast_fp16_to_bf16(model, "post-LoRA")
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total     = sum(p.numel() for p in model.parameters())
