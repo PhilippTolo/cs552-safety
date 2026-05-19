@@ -180,8 +180,19 @@ def load_model_and_tokenizer():
         fast_inference         = True,           # vLLM rollout backend
         gpu_memory_utilization = GPU_MEM_UTIL,
         enforce_eager          = True,           # workaround: vLLM 0.19.1 graph compilation bug
-        dtype                  = torch.bfloat16, # force BF16 to avoid Half/BFloat16 mismatch in LoRA forward
+        dtype                  = torch.bfloat16,
     )
+
+    # With fast_inference=True, Unsloth's training-path model can load in FP16
+    # even when dtype=bfloat16 is requested.  LoRA matrices initialise in BF16
+    # on A100, so addmm_ in matmul_lora raises "Half vs BFloat16".
+    # Fix: cast any residual FP16 base-model params to BF16 before LoRA init.
+    n_fp16 = sum(1 for p in model.parameters() if p.dtype == torch.float16)
+    if n_fp16 > 0:
+        log.info(f"  Casting {n_fp16} FP16 params → BF16 before LoRA init")
+        for p in model.parameters():
+            if p.dtype == torch.float16:
+                p.data = p.data.to(torch.bfloat16)
 
     log.info("Attaching LoRA adapter …")
     model = FastLanguageModel.get_peft_model(

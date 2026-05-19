@@ -39,8 +39,25 @@ CHAR_LIMIT_PROXY  = int(MAX_NEW_TOKENS * TRUNCATION_RATIO * 3.5)
 # HELPERS
 # ===========================================================================
 
-def _extract_answer(text: str) -> Optional[str]:
-    """Extract uppercase letter from last \\boxed{X} in text."""
+def _completion_text(completion) -> str:
+    """Normalise completion to plain string.
+
+    TRL < 0.15 passes completions as strings; TRL >= 0.15 passes them as
+    messages dicts [{"role": "assistant", "content": "..."}].  Both forms
+    are handled here so reward functions work across versions.
+    """
+    if isinstance(completion, str):
+        return completion
+    if isinstance(completion, list):
+        return " ".join(
+            m.get("content", "") for m in completion if isinstance(m, dict)
+        )
+    return str(completion)
+
+
+def _extract_answer(completion) -> Optional[str]:
+    """Extract uppercase letter from last \\boxed{X} in completion."""
+    text = _completion_text(completion)
     matches = re.findall(r"\\boxed\{+([^}]+?)\}+", text, re.IGNORECASE)
     return matches[-1].strip().upper() if matches else None
 
@@ -89,8 +106,9 @@ def boxed_penalty(
     """
     rewards = []
     for completion in completions:
-        has_boxed = _extract_answer(completion) is not None
-        is_trunc  = len(completion) >= CHAR_LIMIT_PROXY
+        text      = _completion_text(completion)
+        has_boxed = _extract_answer(text) is not None
+        is_trunc  = len(text) >= CHAR_LIMIT_PROXY
         if has_boxed:
             rewards.append(0.0)
         elif is_trunc:
