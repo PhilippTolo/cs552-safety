@@ -4,7 +4,7 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True nohup python \
     /scratch/safety/safety/training/sft_train.py \
     --train /scratch/safety/data/mcq_safety_filtered.jsonl \
     --val /scratch/safety/data/pkusafe_sft_val.jsonl \
-    --base-checkpoint /scratch/safety/grpo_v5/merged \
+    --model /scratch/safety/grpo_v5/merged \
     --output-dir /scratch/safety/sft_mcq_v2 \
     --epochs 2 \
     --lr 5e-6 \
