@@ -130,8 +130,11 @@ LORA_TARGET_MODULES = [
 ]
 
 # Rollout — MAX_NEW_TOKENS must match reward_functions.py MAX_NEW_TOKENS
+# sft_v2 has thinking=OFF → model outputs \boxed{X} directly (~5 tokens).
+# 64 tokens leaves room for brief reasoning before the answer.
+# Smaller value = much faster generation (was 512 → 83h total; 64 → ~14h).
 NUM_GENERATIONS  = 8
-MAX_NEW_TOKENS   = 512
+MAX_NEW_TOKENS   = 64
 ROLLOUT_TEMP     = 1.0
 ROLLOUT_TOP_P    = 0.95
 ROLLOUT_TOP_K    = 20
@@ -335,7 +338,18 @@ def main():
         ],
     )
 
-    trainer.train()
+    # Auto-resume from latest checkpoint if one exists
+    latest_ckpt = None
+    if os.path.isdir(OUTPUT_DIR):
+        ckpts = sorted(
+            [d for d in os.listdir(OUTPUT_DIR) if d.startswith("checkpoint-")],
+            key=lambda x: int(x.split("-")[1]),
+        )
+        if ckpts:
+            latest_ckpt = os.path.join(OUTPUT_DIR, ckpts[-1])
+            log.info(f"Resuming from checkpoint: {latest_ckpt}")
+
+    trainer.train(resume_from_checkpoint=latest_ckpt)
 
     save_path = os.path.join(OUTPUT_DIR, "final")
     log.info(f"Saving LoRA adapter → {save_path}")

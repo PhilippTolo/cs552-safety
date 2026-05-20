@@ -30,7 +30,7 @@ PENALTY_NO_BOXED  = -1.5   # non-truncated completion with no \\boxed{}
 PENALTY_TRUNCATED = -0.5   # truncated (hit token limit before writing \\boxed{})
 
 # Must match MAX_NEW_TOKENS in safety_gspo_train.py
-MAX_NEW_TOKENS    = 512
+MAX_NEW_TOKENS    = 64
 TRUNCATION_RATIO  = 0.98
 # Character-to-token proxy for Qwen3 safety completions (~3.5 chars/token)
 CHAR_LIMIT_PROXY  = int(MAX_NEW_TOKENS * TRUNCATION_RATIO * 3.5)
