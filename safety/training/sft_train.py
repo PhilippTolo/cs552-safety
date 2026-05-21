@@ -336,6 +336,8 @@ def parse_args():
                    help="Train for 20 steps only (smoke test)")
     p.add_argument("--max-steps",    type=int, default=-1,
                    help="Override max training steps (ignored unless quick-test or set explicitly)")
+    p.add_argument("--max-grad-norm", type=float, default=1.0,
+                   help="Gradient clipping threshold — use 0.3 for nuclear warm-start runs")
 
     return p.parse_args()
 
@@ -479,6 +481,7 @@ def main():
         gradient_accumulation_steps=args.grad_accum,
         # Optimizer
         learning_rate=args.lr,
+        max_grad_norm=args.max_grad_norm,
         weight_decay=args.weight_decay,
         warmup_ratio=args.warmup_ratio,
         lr_scheduler_type="cosine",
