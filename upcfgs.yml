@@ -1,0 +1,4 @@
+base_model_name: "Qwen/Qwen3-1.7B"
+adapter_path: "/scratch/safety/sft_vibe4/lora_adapter"
+output_path: "/scratch/safety/sft_vibe4/merged"
+repo_id: "cs-552-2026-ma-que/safety_model"

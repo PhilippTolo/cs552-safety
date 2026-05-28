@@ -1,0 +1,33 @@
+model_name: "Qwen/Qwen3-1.7B"
+train_data: "/scratch/safety/data/vibe4_train.jsonl"
+val_data: "/scratch/safety/data/vibe4_val.jsonl"
+max_seq_length: 512
+
+global_config:
+  per_device_batch_size: &BATCH_SIZE 4
+
+lora_config:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+wandb_config:
+  project: "safety_sft"
+  name: "lora_16_vibe4"
+
+sft_args:
+  report_to: "wandb"
+  output_dir: "/scratch/safety/sft_vibe4"
+  per_device_train_batch_size: *BATCH_SIZE
+  per_device_eval_batch_size: *BATCH_SIZE
+  gradient_accumulation_steps: 8
+  num_train_epochs: 2
+  learning_rate: 2.0e-5
+  max_grad_norm: 0.3
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  logging_steps: 10
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 3
+  seed: 42

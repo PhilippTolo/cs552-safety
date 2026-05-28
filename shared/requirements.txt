@@ -4,3 +4,5 @@
 trl>=0.9.0
 peft>=0.11.0
 wandb
+omegaconf
+python-dotenv

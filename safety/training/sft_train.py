@@ -24,6 +24,7 @@ import os
 import sys
 
 import torch
+import wandb
 import torch.nn.functional as F
 from datasets import Dataset
 
@@ -338,6 +339,8 @@ def parse_args():
                    help="Override max training steps (ignored unless quick-test or set explicitly)")
     p.add_argument("--max-grad-norm", type=float, default=1.0,
                    help="Gradient clipping threshold — use 0.3 for nuclear warm-start runs")
+    p.add_argument("--config", default=None,
+                   help="Path to cfgs.yml (OmegaConf); loads wandb_config for wandb.init()")
 
     return p.parse_args()
 
@@ -369,8 +372,75 @@ class StableSFTTrainer(SFTTrainer):
         return (loss, outputs) if return_outputs else loss
 
 
+def find_latest_checkpoint(output_dir: str):
+    """Return the most recent checkpoint-N directory, or None if none exist."""
+    import re
+    from pathlib import Path
+    ckpt_dir = Path(output_dir)
+    if not ckpt_dir.exists():
+        return None
+    checkpoints = [
+        (int(m.group(1)), p)
+        for p in ckpt_dir.iterdir()
+        if (m := re.fullmatch(r"checkpoint-(\d+)", p.name)) and p.is_dir()
+    ]
+    if not checkpoints:
+        return None
+    _, latest = max(checkpoints, key=lambda x: x[0])
+    return str(latest)
+
+
 def main():
     args = parse_args()
+
+    # ── Load cfgs.yml and overlay argparse values ──────────────────────────────
+    if args.config is not None:
+        from dotenv import load_dotenv
+        from omegaconf import OmegaConf
+        load_dotenv()
+        cfg = OmegaConf.load(args.config)
+
+        if hasattr(cfg, "model_name"):
+            args.model = cfg.model_name
+        if hasattr(cfg, "train_data"):
+            td = cfg.train_data
+            args.train = [td] if isinstance(td, str) else list(td)
+        if hasattr(cfg, "val_data"):
+            args.val = cfg.val_data
+        if hasattr(cfg, "max_seq_length"):
+            args.max_seq_length = cfg.max_seq_length
+        if hasattr(cfg, "lora_config"):
+            lc = cfg.lora_config
+            if hasattr(lc, "r"):            args.lora_r       = lc.r
+            if hasattr(lc, "lora_alpha"):   args.lora_alpha   = lc.lora_alpha
+            if hasattr(lc, "lora_dropout"): args.lora_dropout = lc.lora_dropout
+        if hasattr(cfg, "sft_args"):
+            sa = cfg.sft_args
+            _map = [
+                ("output_dir",                 "output_dir"),
+                ("per_device_train_batch_size", "batch_size"),
+                ("gradient_accumulation_steps", "grad_accum"),
+                ("num_train_epochs",            "epochs"),
+                ("learning_rate",               "lr"),
+                ("max_grad_norm",               "max_grad_norm"),
+                ("warmup_ratio",                "warmup_ratio"),
+                ("weight_decay",                "weight_decay"),
+                ("logging_steps",               "logging_steps"),
+                ("eval_steps",                  "eval_steps"),
+                ("save_steps",                  "save_steps"),
+                ("save_total_limit",            "save_total_limit"),
+                ("seed",                        "seed"),
+                ("report_to",                   "report_to"),
+            ]
+            for cfg_key, arg_key in _map:
+                if hasattr(sa, cfg_key):
+                    setattr(args, arg_key, getattr(sa, cfg_key))
+            if hasattr(sa, "max_steps") and sa.max_steps > 0:
+                args.max_steps = sa.max_steps
+
+        if args.report_to == "wandb" and hasattr(cfg, "wandb_config"):
+            wandb_config_dict = OmegaConf.to_container(cfg.wandb_config, resolve=True)
+            wandb.init(**wandb_config_dict)
 
     if args.quick_test:
         args.max_steps = 20
@@ -394,6 +464,12 @@ def main():
     print(f"{'='*60}\n")
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    resume_from = find_latest_checkpoint(args.output_dir)
+    if resume_from:
+        print(f"[Resume] Resuming training from: {resume_from}")
+    else:
+        print("[Resume] No checkpoint found — starting fresh.")
 
     # ── Tokenizer ─────────────────────────────────────────────────────────────
     print("[1/6] Loading tokenizer...")
@@ -558,7 +634,7 @@ def main():
             callbacks=[format_callback],
         )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     adapter_dir = os.path.join(args.output_dir, "lora_adapter")
