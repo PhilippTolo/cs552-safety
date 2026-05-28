@@ -149,13 +149,21 @@ def load_safetybench(config: str = HF_CONFIG) -> list[dict]:
             f"print(load_dataset('{HF_DATASET}').config_names)\""
         )
 
-    # Merge all available splits (SafetyBench may only have 'test').
+    # The 'test' config has three splits: 'en', 'zh', 'zh_subset'.
+    # Use only the English split; fall back to merging all splits if 'en' absent.
     all_rows: list[dict] = []
     for split_name, split_ds in raw.items():
         print(f"  split={split_name!r}: {len(split_ds):,} rows, "
               f"columns={split_ds.column_names}")
-        all_rows.extend(split_ds)
-    print(f"  Total rows: {len(all_rows):,}")
+
+    if "en" in raw:
+        all_rows = list(raw["en"])
+        print(f"  Using English split only: {len(all_rows):,} rows")
+    else:
+        for split_ds in raw.values():
+            all_rows.extend(split_ds)
+        print(f"  Total rows (all splits merged): {len(all_rows):,}")
+
     return all_rows
 
 
