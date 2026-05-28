@@ -125,8 +125,29 @@ def load_safetybench(config: str = HF_CONFIG) -> list[dict]:
         gold_answer : str   (single capital letter A/B/C/D, or None if unavailable)
         category    : str   (safety category for per-category WandB logging)
     """
-    print(f"[data] Loading {HF_DATASET!r} config={config!r}...")
-    raw = load_dataset(HF_DATASET, config)
+    # SafetyBench exposes configs 'test' and 'dev' — NOT language names.
+    # Try the requested config first; if it fails (e.g. "en" not found),
+    # fall back to "test" which holds the full 25k-row English dataset.
+    configs_to_try = [config] if config not in ("test", "dev") else [config]
+    if config not in ("test", "dev"):
+        configs_to_try.append("test")
+
+    raw = None
+    for cfg in configs_to_try:
+        try:
+            print(f"[data] Loading {HF_DATASET!r} config={cfg!r}...")
+            raw = load_dataset(HF_DATASET, cfg)
+            break
+        except ValueError as e:
+            print(f"  config={cfg!r} not found ({e}), trying next...")
+
+    if raw is None:
+        raise RuntimeError(
+            f"Could not load {HF_DATASET}. "
+            f"Tried configs: {configs_to_try}. "
+            f"Run: python -c \"from datasets import load_dataset; "
+            f"print(load_dataset('{HF_DATASET}').config_names)\""
+        )
 
     # Merge all available splits (SafetyBench may only have 'test').
     all_rows: list[dict] = []
