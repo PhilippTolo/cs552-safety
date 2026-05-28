@@ -666,8 +666,11 @@ def main():
     reward_fn   = make_reward_fn(has_labels)
 
     # Try multiple argument combinations for TRL version compatibility.
+    # Newer TRL (>= 1.0) manages the reference model internally when beta > 0
+    # and raises TypeError if ref_model is passed explicitly.  Always fall back
+    # to omitting ref_model so the loop succeeds on all TRL versions.
     trainer = None
-    ref_kw_opts = ({"ref_model": ref_model},) if ref_model else ({},)
+    ref_kw_opts = ([{"ref_model": ref_model}, {}] if ref_model else [{}])
     for ref_kw in ref_kw_opts:
         for pc_kw in ({"processing_class": tokenizer}, {"tokenizer": tokenizer}):
             for ev_kw in ({"eval_dataset": val_ds}, {}):
