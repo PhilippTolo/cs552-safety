@@ -112,6 +112,50 @@ LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 # Data loading & formatting
 # ─────────────────────────────────────────────────────────────────────────────
 
+def load_jsonl_as_grpo(path: str) -> tuple[Dataset, bool]:
+    """Load a pre-built JSONL file (e.g. vibe2_train.jsonl) into GRPO format.
+
+    Expected schema — each line is:
+        {"messages": [
+            {"role": "system",    "content": "..."},
+            {"role": "user",      "content": "<question + options>"},
+            {"role": "assistant", "content": "\\boxed{X}"}
+        ]}
+
+    Returns (Dataset, has_labels=True) — gold_answer extracted from the
+    assistant turn.  Multi-letter or missing boxed answers are skipped.
+    """
+    records = []
+    skipped = 0
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            ex = json.loads(line)
+            msgs = ex.get("messages", [])
+            # Separate prompt messages from assistant turn
+            assistant_turns = [m for m in msgs if m.get("role") == "assistant"]
+            prompt_msgs     = [m for m in msgs if m.get("role") != "assistant"]
+            if not assistant_turns or not prompt_msgs:
+                skipped += 1
+                continue
+            gold_raw = assistant_turns[-1].get("content", "")
+            gold     = _extract_boxed(gold_raw)
+            if gold is None or len(gold) != 1:
+                skipped += 1
+                continue
+            records.append({
+                "prompt":      prompt_msgs,
+                "gold_answer": gold,
+                "category":    str(ex.get("category", "unknown")),
+            })
+
+    if skipped:
+        print(f"  [warn] Skipped {skipped} rows (missing gold answer).")
+    print(f"  Loaded {len(records):,} labeled examples from {path}")
+    return Dataset.from_list(records), True
+
 def load_safetybench(config: str = HF_CONFIG) -> list[dict]:
     """Load SafetyBench and convert to GRPO-ready records.
 
@@ -475,13 +519,19 @@ def parse_args() -> argparse.Namespace:
         description="GRPO fine-tuning of Qwen3-1.7B on SafetyBench (English)."
     )
 
-    # Data
+    # Data — SafetyBench (default) or pre-built labeled JSONL
+    p.add_argument("--train-jsonl", default=None,
+                   help="Path to labeled JSONL (e.g. vibe2_train.jsonl). "
+                        "If set, skips SafetyBench and uses accuracy reward.")
+    p.add_argument("--val-jsonl",   default=None,
+                   help="Path to validation JSONL (paired with --train-jsonl).")
     p.add_argument("--hf-config",   default=HF_CONFIG,
-                   help="SafetyBench language config (default: 'en')")
+                   help="SafetyBench language config (default: 'en'); "
+                        "ignored when --train-jsonl is set")
     p.add_argument("--max-samples", type=int, default=20_000,
-                   help="Cap training examples (0 = no cap)")
+                   help="Cap training examples (0 = no cap); applies to SafetyBench only")
     p.add_argument("--val-size",    type=int, default=300,
-                   help="Examples held out for logged evaluation")
+                   help="Validation split size; ignored when --val-jsonl is set")
     p.add_argument("--check-labels", action="store_true",
                    help="Load dataset, print label stats, then exit (no training)")
 
@@ -594,16 +644,25 @@ def main():
         print("  chat_template patched: enable_thinking=false")
 
     # ── 2. Data ───────────────────────────────────────────────────────────────
-    print("[2/6] Loading SafetyBench...")
-    rows = load_safetybench(args.hf_config)
-    max_s = args.max_samples if args.max_samples > 0 else None
-    full_ds, has_labels = build_grpo_dataset(rows, max_samples=max_s, seed=args.seed)
+    if args.train_jsonl:
+        print(f"[2/6] Loading labeled JSONL (accuracy reward enabled)...")
+        train_ds, has_labels = load_jsonl_as_grpo(args.train_jsonl)
+        if args.val_jsonl:
+            val_ds, _ = load_jsonl_as_grpo(args.val_jsonl)
+        else:
+            splits   = train_ds.train_test_split(test_size=args.val_size, seed=args.seed)
+            train_ds = splits["train"]
+            val_ds   = splits["test"]
+    else:
+        print("[2/6] Loading SafetyBench (format-only reward — no public labels)...")
+        rows = load_safetybench(args.hf_config)
+        max_s = args.max_samples if args.max_samples > 0 else None
+        full_ds, has_labels = build_grpo_dataset(rows, max_samples=max_s, seed=args.seed)
+        n_val    = min(args.val_size, len(full_ds) // 10)
+        splits   = full_ds.train_test_split(test_size=n_val, seed=args.seed)
+        train_ds = splits["train"]
+        val_ds   = splits["test"]
 
-    # Train / val split
-    n_val   = min(args.val_size, len(full_ds) // 10)
-    n_train = len(full_ds) - n_val
-    splits  = full_ds.train_test_split(test_size=n_val, seed=args.seed)
-    train_ds, val_ds = splits["train"], splits["test"]
     print(f"  train={len(train_ds):,}  val={len(val_ds):,}  labels={has_labels}")
 
     # Category distribution for monitoring
