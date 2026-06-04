@@ -225,10 +225,13 @@ def main():
 
     # ── 1. Load SafetyBench ───────────────────────────────────────────────────
     print(f"[1/5] Downloading {HF_DATASET}...")
+    # thu-coai/SafetyBench uses config names ('test'/'dev'), not standard splits.
+    # 'test' config is the main English question set (~4,900 rows).
     try:
-        ds = load_dataset(HF_DATASET, split="test")
+        ds_dict = load_dataset(HF_DATASET, "test")
+        ds = ds_dict[list(ds_dict.keys())[0]]
     except Exception:
-        ds_dict = load_dataset(HF_DATASET)
+        ds_dict = load_dataset(HF_DATASET, "dev")
         ds = ds_dict[list(ds_dict.keys())[0]]
 
     raw = []
