@@ -47,7 +47,7 @@ from datasets import load_dataset
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 HF_DATASET = "walledai/SaladBench"
-HF_CONFIG  = "MRQ"
+HF_CONFIG  = "mrq"
 LETTERS    = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 SYSTEM_PROMPT = (
