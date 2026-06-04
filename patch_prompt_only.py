@@ -1,6 +1,8 @@
 import json, re, pathlib
 
 OUT = "/scratch/safety/prompt_only"
+SRC = ("/scratch/hf_cache/hub/models--Qwen--Qwen3-1.7B"
+       "/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e")
 
 SYS = (
     "You are a careful reasoning assistant. Think step by step before answering. "
@@ -10,15 +12,27 @@ SYS = (
     "Never leave the final answer unboxed."
 )
 
-p = pathlib.Path(OUT + "/chat_template.jinja")
-if p.exists():
-    t = p.read_text()
-else:
-    tc = json.load(open(OUT + "/tokenizer_config.json"))
-    t = tc.get("chat_template", "")
-    if not t:
-        raise RuntimeError("No chat_template in tokenizer_config.json")
-    print("Extracted template from tokenizer_config.json")
+
+def get_template():
+    for d in [OUT, SRC]:
+        jinja = pathlib.Path(d + "/chat_template.jinja")
+        if jinja.exists():
+            print(f"  template source: {jinja}")
+            return jinja.read_text()
+        tc_path = pathlib.Path(d + "/tokenizer_config.json")
+        if tc_path.exists():
+            try:
+                tc = json.load(open(tc_path))
+                t = tc.get("chat_template", "")
+                if t:
+                    print(f"  template source: {tc_path} (embedded)")
+                    return t
+            except Exception as ex:
+                print(f"  could not read {tc_path}: {ex}")
+    raise RuntimeError("Cannot find chat_template in OUT or SRC")
+
+
+t = get_template()
 t = re.sub(r"\{%-?\s*set enable_thinking\s*=\s*false\s*-?%\}\s*\n?", "", t)
 
 e = SYS.replace("\\", "\\\\").replace("'", "\\'")
@@ -27,7 +41,7 @@ inj = (
     "{%- set messages = [{'role': 'system', 'content': '" + e + "'}] + messages %}\n"
     "{%- endif %}\n"
 )
-p.write_text(inj + t)
+pathlib.Path(OUT + "/chat_template.jinja").write_text(inj + t)
 print("Template written. thinking=false present:", "enable_thinking = false" in t)
 
 cfg = {

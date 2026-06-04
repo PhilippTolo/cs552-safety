@@ -48,7 +48,11 @@ grpo_args:
   min_p: 0
 
   # ── Optimisation ────────────────────────────────────────────────────────────────
-  learning_rate: 1.0e-5              # RL fine-tuning; lower than SFT (5e-6 warm start)
+  # "LoRA Without Regret" / "Learning Rate Matters" (arxiv 2602.04998):
+  # LoRA LR should be ~10× FullFT LR. FullFT GRPO ≈ 3e-6 to 5e-6 → LoRA GRPO ≈ 3e-5 to 5e-5.
+  # Original v2 run used 1.0e-5 (likely too low — in FullFT territory, not LoRA territory).
+  # If v2 shows frac_reward_zero_std ≥ 0.8, kill and restart with this value instead.
+  learning_rate: 3.0e-5              # LoRA-adjusted GRPO LR (v2 was 1e-5 — too low per paper)
   lr_scheduler_type: "cosine"
   warmup_steps: 50
   num_train_epochs: 1                # >1 epoch risks reward hacking
