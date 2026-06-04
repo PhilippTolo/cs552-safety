@@ -41,6 +41,26 @@ After training:
 
 import os
 import sys
+import types
+
+# bitsandbytes is incompatible with CUDA 12.8 on this cluster (Lesson 1).
+# Pre-populate sys.modules with mock modules BEFORE any peft/trl import so
+# peft falls through to the standard (non-quantised) LoRA path.
+# Must use types.ModuleType — MagicMock causes __spec__ AttributeError in TRL.
+if "bitsandbytes" not in sys.modules:
+    _bnb = types.ModuleType("bitsandbytes")
+    for _s in ["nn", "optim", "functional", "cextension", "cuda_setup",
+               "utils", "research", "research.nn", "research.nn.modules"]:
+        _sub = types.ModuleType(f"bitsandbytes.{_s}")
+        sys.modules[f"bitsandbytes.{_s}"] = _sub
+        setattr(_bnb, _s.split(".")[0], _sub)
+    class _Stub:
+        pass
+    _bnb.nn.Linear8bitLt = _Stub
+    _bnb.nn.Linear4bit   = _Stub
+    _bnb.nn.Int8Params   = _Stub
+    _bnb.cextension.COMPILED_WITH_CUDA = False
+    sys.modules["bitsandbytes"] = _bnb
 
 import torch
 from omegaconf import OmegaConf
