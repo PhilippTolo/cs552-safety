@@ -62,7 +62,7 @@ TOP_P        = 1.0      # full vocabulary — matches GRPO training rollout sett
 TOP_K        = -1       # -1 = disabled (all tokens)
 MAX_TOKENS   = 32       # \boxed{X} is ~5 tokens; 32 gives plenty of room
 GPU_MEM_UTIL = 0.80
-MAX_MODEL_LEN = 4096
+MAX_MODEL_LEN = 8192
 
 BATCH_SIZE   = 256      # prompts per vLLM call
 
