@@ -27,8 +27,10 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import random
+import re
 import sys
 
 import torch
@@ -94,21 +96,19 @@ def load_jsonl(path: str) -> list[dict]:
 
 
 def to_grpo_dataset(examples: list[dict]) -> Dataset:
-    """Convert pkusafe GRPO examples to GRPOTrainer format.
+    """Convert GRPO examples to GRPOTrainer format.
 
-    GRPOTrainer expects a "prompt" column with a list of messages.
-    All other columns (gold_answer) are forwarded to reward functions as **kwargs.
+    Expects examples with "messages" (list of role/content dicts, without the
+    assistant turn) and "gold_answer" (single uppercase letter).
+    gold_answer is forwarded to the reward function via **kwargs.
 
     IMPORTANT: remove_unused_columns=False must be set in GRPOConfig so that
     gold_answer is not stripped before it reaches the reward function.
     """
     records = [
         {
-            "prompt": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": ex["prompt"]},
-            ],
-            "gold_answer": ex["gold_answer"],   # forwarded to safety_reward via **kwargs
+            "prompt": ex["messages"],
+            "gold_answer": ex["gold_answer"],
         }
         for ex in examples
     ]
@@ -121,32 +121,33 @@ def to_grpo_dataset(examples: list[dict]) -> Dataset:
 
 def safety_reward(completions: list[str], **kwargs) -> list[float]:
     """
-    r = 0.5 * r_format + 0.5 * r_accuracy  (additive).
+    4-component reward (adapted from nlp_project reward_fns.py):
 
-    Additive rather than multiplicative so format signal flows even when the
-    model is not yet accurate — multiplicative rewards collapse to all-zero
-    batches at training start (std=0 → NaN GRPO advantage).
+    1. correctness:   +2.0 correct, 0.0 wrong
+    2. boxed_penalty: -1.5 ONLY when missing AND not truncated
+                      (avoids double-penalising truncated completions)
+    3. length_reward: cosine bonus peaking at 15% of max_tokens for correct;
+                      tiny linear bonus for wrong (prevents empty-output collapse)
+    4. multi-box guard: 0.0 if more than one \\boxed{} (alphabet enumeration)
 
-    r_format   = 1.0 if \\boxed{A} or \\boxed{B} present, else 0.0
-    r_accuracy = 1.0 if boxed answer matches gold,         else 0.0
+    Critical fix vs previous version: r_format checked only ("A","B") which
+    gave equal reward to "wrong A" and "correct C/D" — model learned to always
+    output A/B. Now any single uppercase letter is a valid format.
 
-    Called by GRPOTrainer with:
-        completions : list of generated texts, length = batch_size * num_generations
-        kwargs      : dataset columns forwarded verbatim; we use "gold_answer"
+    β=0.0 (default): no KL penalty, DAPO-style free exploration.
     """
     if "gold_answer" not in kwargs:
         raise RuntimeError(
             "safety_reward: 'gold_answer' not in kwargs.\n"
-            "Most likely cause: remove_unused_columns=True stripped it from the dataset.\n"
             "Fix: ensure GRPOConfig is built with remove_unused_columns=False."
         )
 
     gold_answers = kwargs["gold_answer"]
+    max_tokens = 64        # must match --max-completion-length
+    ideal_ratio = 0.15     # \boxed{A} ~5-8 tokens in a 64-token budget
     rewards = []
 
     for completion, gold in zip(completions, gold_answers):
-        # TRL >= 1.0 passes completions as lists of message dicts;
-        # older TRL passes plain strings. Handle both.
         if isinstance(completion, list):
             text = "".join(
                 msg.get("content", "") if isinstance(msg, dict) else str(msg)
@@ -155,19 +156,42 @@ def safety_reward(completions: list[str], **kwargs) -> list[float]:
         else:
             text = completion
 
-        extracted = extract_boxed(text)
+        # Extract single uppercase letter from \boxed{}
+        m = re.search(r'\\boxed\{([A-Z])\}', text)
+        pred = m.group(1) if m else None
+        correct = (pred == str(gold).strip().upper()) if pred else False
+        has_box = pred is not None
 
-        r_format   = 1.0 if extracted in ("A", "B") else 0.0
-        r_accuracy = 1.0 if (extracted is not None and extracted == str(gold).upper()) else 0.0
-
-        # Penalise alphabet enumeration: more than one \boxed{} in the
-        # completion means the model is listing options rather than committing
-        # to a single answer — zero out both sub-rewards.
+        # Multiple \boxed{} = alphabet enumeration → zero reward
         if text.count("\\boxed{") > 1:
-            r_format   = 0.0
-            r_accuracy = 0.0
+            rewards.append(0.0)
+            continue
 
-        rewards.append(0.5 * r_format + 0.5 * r_accuracy)
+        # Approximate token length (words × 1.3 ≈ tokens for English)
+        len_ratio = min(len(text.split()) * 1.3 / max_tokens, 1.0)
+
+        # Truncation: long completion with no \boxed{} = probably cut off mid-output
+        truncated = (not has_box) and (len_ratio >= 0.85)
+
+        # 1. Correctness
+        r = 2.0 if correct else 0.0
+
+        # 2. Boxed penalty (skip for truncated — they're already penalised by losing +2.0)
+        if not has_box and not truncated:
+            r -= 1.5
+
+        # 3. Length reward
+        if correct:
+            # Cosine: peaks at ideal_ratio, falls to 0 at both extremes
+            if len_ratio <= ideal_ratio:
+                angle = math.pi * len_ratio / (2 * ideal_ratio)
+            else:
+                angle = math.pi / 2 + math.pi * (len_ratio - ideal_ratio) / (2 * (1 - ideal_ratio))
+            r += 0.5 * (math.cos(angle) * 0.5 + 0.5)
+        else:
+            r += 0.1 * len_ratio  # tiny bonus: keeps model generating rather than going empty
+
+        rewards.append(r)
 
     return rewards
 

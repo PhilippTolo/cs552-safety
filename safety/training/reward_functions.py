@@ -118,6 +118,52 @@ def boxed_penalty(
     return rewards
 
 # ===========================================================================
+# REWARD FUNCTION 3 — Format (positional, mirrors math teammate)
+# ===========================================================================
+
+def format_reward(
+    prompts:     list,
+    completions: list,
+    **kwargs,
+) -> list[float]:
+    """
+    Format compliance reward — rewards \\boxed{X} appearing near the end.
+
+    For safety MCQ (thinking=OFF) the ideal completion is just \\boxed{X}.
+    We reward the \boxed{} being at or near the end of the response to
+    discourage "answer first, then ramble" patterns.
+
+    Scoring:
+        1.0  single \\boxed{letter} found, in the last 40% of the text
+        0.5  \\boxed{} found but in the first 60% (answer too early / buried)
+        0.0  no \\boxed{} at all
+        0.0  multiple \\boxed{} (alphabet enumeration bug)
+
+    Mirrors nlp_project/utils/reward_functions.py::format_reward with an
+    added guard against the alphabet-enumeration failure mode specific to
+    safety MCQ (model outputs \\boxed{A}\\boxed{B}\\boxed{C}...).
+    """
+    rewards = []
+    for completion in completions:
+        text = _completion_text(completion)
+
+        # Guard: multiple \boxed{} = enumeration bug → zero reward
+        if text.count(r"\boxed{") > 1:
+            rewards.append(0.0)
+            continue
+
+        idx = text.rfind(r"\boxed{")
+        if idx == -1:
+            rewards.append(0.0)
+            continue
+
+        relative_pos = idx / max(len(text), 1)
+        rewards.append(1.0 if relative_pos >= 0.6 else 0.5)
+
+    return rewards
+
+
+# ===========================================================================
 # SUMMARY (for startup logging)
 # ===========================================================================
 
