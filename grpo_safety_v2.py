@@ -42,16 +42,20 @@ After training:
 import os
 import sys
 import types
+import importlib.machinery
 
 # bitsandbytes is incompatible with CUDA 12.8 on this cluster (Lesson 1).
 # Pre-populate sys.modules with mock modules BEFORE any peft/trl import so
 # peft falls through to the standard (non-quantised) LoRA path.
 # Must use types.ModuleType — MagicMock causes __spec__ AttributeError in TRL.
+# Must set __spec__ explicitly — TRL lazy-loader raises RuntimeError if __spec__ is None.
 if "bitsandbytes" not in sys.modules:
     _bnb = types.ModuleType("bitsandbytes")
+    _bnb.__spec__ = importlib.machinery.ModuleSpec("bitsandbytes", None)
     for _s in ["nn", "optim", "functional", "cextension", "cuda_setup",
                "utils", "research", "research.nn", "research.nn.modules"]:
         _sub = types.ModuleType(f"bitsandbytes.{_s}")
+        _sub.__spec__ = importlib.machinery.ModuleSpec(f"bitsandbytes.{_s}", None)
         sys.modules[f"bitsandbytes.{_s}"] = _sub
         setattr(_bnb, _s.split(".")[0], _sub)
     class _Stub:
