@@ -52,8 +52,19 @@ MIN_THINKING_CHARS = 80
 
 
 def extract_boxed(text: str) -> str | None:
-    m = re.search(r"\\boxed\{+([A-D])\}+", text)
+    m = re.search(r"\\boxed\{+([A-Z])\}+", text)
     return m.group(1) if m else None
+
+
+def get_gold(ex: dict) -> str:
+    """Gold answer from a top-level 'answer' field, or fall back to the
+    \\boxed{X} letter in the assistant message (messages-format inputs)."""
+    gold = ex.get("answer", "")
+    if not gold:
+        msgs = ex.get("messages", [])
+        if len(msgs) >= 3:
+            gold = extract_boxed(msgs[-1].get("content", "")) or ""
+    return gold
 
 
 def build_prompts(examples: list[dict], tokenizer) -> list[str]:
@@ -158,7 +169,7 @@ def main():
                 skipped_no_box += 1
                 continue
 
-            gold = ex.get("answer", "")
+            gold = get_gold(ex)
             if pred != gold:
                 skipped_wrong += 1
                 continue

@@ -6,3 +6,4 @@ checkpoints/
 processed/
 *.log
 .env
+CLAUDE.md
