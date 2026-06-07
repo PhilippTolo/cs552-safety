@@ -159,6 +159,10 @@ def main():
                 continue
 
             thinking = raw_text[:think_end].strip()
+            # With enable_thinking=True the prompt ends at "assistant\n" (Lesson 30),
+            # so the model emits its OWN opening <think>. Strip it to avoid the
+            # double-<think> bug (Lesson 37) when we re-wrap below.
+            thinking = re.sub(r"^<think>\s*", "", thinking).strip()
             if len(thinking) < MIN_THINKING_CHARS:
                 skipped_no_think += 1
                 continue
