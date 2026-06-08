@@ -26,6 +26,10 @@ lora:
 # ── Dataset ──────────────────────────────────────────────────
 dataset:
   repo: "cs-552-2026-vibe-trainers/mcq_safety"
+  # If set, load this pre-filtered jsonl ({question_text, answer}) instead of
+  # streaming + slicing from HF. Produce it with make_train_set.py to fix the
+  # zero-gradient collapse (keeps only learnable prompts). null = use HF head.
+  local_file: null   # e.g. "grpo_cold/train_filtered.jsonl"
   sources: [safetybench, salad]   # drop "wildguard" (harm-category noise, CLAUDE.md §20)
   # Budget: at ~6 s/prompt (short non-thinking completions), 6 h ≈ 3,600 prompts.
   # The filtered (safetybench+salad, A–D) pool is ~10–12k rows; fraction 0.30 of
@@ -51,9 +55,9 @@ rollout:
   num_generations: 8           # group size per prompt
   max_prompt_length: 2048      # golden few-shot system prompt + question
   max_completion_length: 512   # brief reasoning + boxed letter; non-thinking
-  temperature: 0.9             # exploration across the options (key: BASE is not
-  top_p: 0.95                  #   overconfident cold, so rollouts stay diverse →
-  top_k: 20                    #   non-zero group variance, unlike GRPO-from-SFT)
+  temperature: 1.1             # raised: safety MCQ is easy for BASE → low rollout
+  top_p: 1.0                   #   diversity → zero-grad collapse. Higher temp +
+  top_k: 50                    #   difficulty filtering (make_train_set.py) restore variance.
 
 # ── Training ─────────────────────────────────────────────────
 training:
@@ -61,8 +65,8 @@ training:
   num_train_epochs: 1
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8   # effective batch = 8 prompts / optim step
-  learning_rate: 5.0e-6            # teammate's proven default. Lesson 50: 1e-5–3e-5
-                                   #   trains faster for LoRA GRPO if convergence is slow.
+  learning_rate: 1.5e-5            # raised from 5e-6 (Lesson 50: LoRA GRPO wants
+                                   #   ~10x FullFT LR). Needed since few effective steps.
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.05
   weight_decay: 1.0e-4

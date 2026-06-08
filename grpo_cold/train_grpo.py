@@ -141,14 +141,26 @@ def vllm_server(cfg: DictConfig):
 # ---------------------------------------------------------------------------
 
 def load_training_data(cfg: DictConfig, tokenizer) -> Dataset:
-    """vibe-trainers mcq_safety → chat-templated (non-thinking) prompts + gold letters."""
+    """vibe-trainers mcq_safety → chat-templated (non-thinking) prompts + gold letters.
+
+    If cfg.dataset.local_file is set, load that difficulty-filtered jsonl
+    (make_train_set.py) instead of slicing from HF — this is the fix for the
+    zero-gradient collapse on easy prompts.
+    """
     d = cfg.dataset
-    base = load_mc_dataset(
-        sources=list(d.sources) if d.get("sources") is not None else None,
-        fraction=float(d.fraction),
-        seed=int(cfg.training.seed),
-        hf_token=cfg.model.get("hf_token"),
-    )
+    local = d.get("local_file")
+    if local:
+        import json
+        recs = [json.loads(line) for line in open(local, encoding="utf-8") if line.strip()]
+        base = Dataset.from_list(recs)
+        log.info("Loaded %d pre-filtered prompts from %s", len(base), local)
+    else:
+        base = load_mc_dataset(
+            sources=list(d.sources) if d.get("sources") is not None else None,
+            fraction=float(d.fraction),
+            seed=int(cfg.training.seed),
+            hf_token=cfg.model.get("hf_token"),
+        )
 
     def _to_prompt(row: dict) -> dict:
         messages = [
