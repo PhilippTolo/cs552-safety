@@ -141,12 +141,7 @@ def vllm_server(cfg: DictConfig):
 # ---------------------------------------------------------------------------
 
 def load_training_data(cfg: DictConfig, tokenizer) -> Dataset:
-    """vibe-trainers mcq_safety → chat-templated (non-thinking) prompts + gold letters.
-
-    If cfg.dataset.local_file is set, load that difficulty-filtered jsonl
-    (make_train_set.py) instead of slicing from HF — this is the fix for the
-    zero-gradient collapse on easy prompts.
-    """
+    """Build the GRPO training set."""
     d = cfg.dataset
     local = d.get("local_file")
     if local:

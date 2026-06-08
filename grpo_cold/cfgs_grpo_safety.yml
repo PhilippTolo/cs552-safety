@@ -29,7 +29,7 @@ dataset:
   # If set, load this pre-filtered jsonl ({question_text, answer}) instead of
   # streaming + slicing from HF. Produce it with make_train_set.py to fix the
   # zero-gradient collapse (keeps only learnable prompts). null = use HF head.
-  local_file: null   # e.g. "grpo_cold/train_filtered.jsonl"
+  local_file: "grpo_cold/train_filtered.jsonl"   # difficulty-filtered learnable prompts
   sources: [safetybench, salad]   # drop "wildguard" (harm-category noise, CLAUDE.md §20)
   # Budget: at ~6 s/prompt (short non-thinking completions), 6 h ≈ 3,600 prompts.
   # The filtered (safetybench+salad, A–D) pool is ~10–12k rows; fraction 0.30 of
@@ -62,7 +62,7 @@ rollout:
 # ── Training ─────────────────────────────────────────────────
 training:
   output_dir: "./grpo_safety_checkpoints"
-  num_train_epochs: 1
+  num_train_epochs: 4   # filtered set is small (~1.1k); several passes to learn it
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8   # effective batch = 8 prompts / optim step
   learning_rate: 1.5e-5            # raised from 5e-6 (Lesson 50: LoRA GRPO wants
