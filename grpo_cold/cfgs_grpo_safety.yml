@@ -1,0 +1,89 @@
+# ============================================================
+# cfgs_grpo_safety.yml — GRPO on Qwen3-1.7B for safety MC (cold, from BASE)
+# cs-552-2026-vibe-trainers/mcq_safety  |  non-thinking  |  format + correctness
+# Single A100 40 GB. Mirrors multi_lin/cfgs_grpo_mc.yml.
+# ============================================================
+
+# ── Model ────────────────────────────────────────────────────
+model:
+  base_model_repo: "Qwen/Qwen3-1.7B"   # GRPO directly on the starting model (cold)
+  hf_token: "YOUR_HUGGINGFACE_TOKEN"    # ← fill in (or rely on `hf auth login`)
+
+# ── LoRA ─────────────────────────────────────────────────────
+lora:
+  rank: 32
+  alpha: 32                              # alpha / r = 1 (project Lesson 50 convention)
+  dropout: 0.0
+  target_modules:                        # all 7 — attention-only underperforms (Lesson 50)
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+# ── Dataset ──────────────────────────────────────────────────
+dataset:
+  repo: "cs-552-2026-vibe-trainers/mcq_safety"
+  sources: [safetybench, salad]   # drop "wildguard" (harm-category noise, CLAUDE.md §20)
+  # Budget: at ~6 s/prompt (short non-thinking completions), 6 h ≈ 3,600 prompts.
+  # The filtered (safetybench+salad, A–D) pool is ~10–12k rows; fraction 0.30 of
+  # the full ~16k shuffle ≈ ~3–4k kept prompts ≈ ~6 h (1 epoch). Raise for longer.
+  # Held-out test stays disjoint: make_test_set takes the TAIL, training the HEAD.
+  fraction: 0.30
+
+# ── Reward weights (format + correctness ONLY — no length) ───
+reward:
+  correct: 1.0          # +1.0 when the boxed letter matches the gold option
+  format: 0.2           # +0.2 for a well-formed \boxed{<single letter>}
+  format_penalty: -0.5  # penalty when no valid boxed letter is produced
+
+# ── GRPO / GSPO algorithm (mirrors multi_lin) ───────────────
+algorithm:
+  importance_sampling_level: "sequence"  # "sequence" = GSPO, "token" = GRPO
+  beta: 0.0          # KL coefficient (0.0 = DAPO style). Raise to ~0.04 if it drifts.
+  epsilon: 0.2       # PPO clipping range
+  loss_type: "dapo"
+
+# ── Rollout (non-thinking → short completions) ──────────────
+rollout:
+  num_generations: 8           # group size per prompt
+  max_prompt_length: 2048      # golden few-shot system prompt + question
+  max_completion_length: 512   # brief reasoning + boxed letter; non-thinking
+  temperature: 0.9             # exploration across the options (key: BASE is not
+  top_p: 0.95                  #   overconfident cold, so rollouts stay diverse →
+  top_k: 20                    #   non-zero group variance, unlike GRPO-from-SFT)
+
+# ── Training ─────────────────────────────────────────────────
+training:
+  output_dir: "./grpo_safety_checkpoints"
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8   # effective batch = 8 prompts / optim step
+  learning_rate: 5.0e-6            # teammate's proven default. Lesson 50: 1e-5–3e-5
+                                   #   trains faster for LoRA GRPO if convergence is slow.
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.05
+  weight_decay: 1.0e-4
+  max_grad_norm: 0.5
+  optim: "adamw_torch_fused"
+  gradient_checkpointing: true
+
+  report_to: "wandb"
+  run_name: "grpo_safety_cold_v1"
+  logging_steps: 5
+  save_strategy: "steps"
+  save_steps: 100
+  save_total_limit: 3
+
+  seed: 42
+  remove_unused_columns: false     # keep `answer` for the reward functions
+
+# ── vLLM (optional; default off → runs out of the box) ───────
+vllm:
+  enabled: false
+  model: "Qwen/Qwen3-1.7B"
+  tensor_parallel_size: 1
+  gpu_memory_utilization: 0.30
+  port: 8000
